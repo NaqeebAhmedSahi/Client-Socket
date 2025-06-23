@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import socket from './socket';
+import socket from '../socket';
 import { v4 as uuidv4 } from 'uuid';
 
 const PinAuth = () => {
@@ -20,21 +20,22 @@ const PinAuth = () => {
     if (/Mac/i.test(ua)) return 'Mac Device';
     return 'Unknown Device';
   });
-  const heartbeatInterval = useRef();
 
   useEffect(() => {
-    // Setup socket event listeners
-    const onForceLogout = (data) => {
+    const handleForceLogout = (data) => {
       toast.warning(
-        data.reason === 'logged-in-elsewhere'
+        data.reason === 'new-session-different-device'
           ? `Logged out - New session on ${data.newDevice}`
-          : 'You have been logged out',
+          : 'Logged out - New session on this device',
         { position: 'top-center', autoClose: 5000 }
       );
-      handleCleanLogout();
+      setIsLoggedIn(false);
+      setPin('');
+      socket.disconnect();
+      setTimeout(() => socket.connect(), 1000);
     };
 
-    const onSessionRegistered = (data) => {
+    const handleSessionRegistered = (data) => {
       setIsLoggedIn(true);
       if (data.isNew) {
         toast.success('New session created', { position: 'top-center' });
@@ -43,63 +44,28 @@ const PinAuth = () => {
       }
     };
 
-    const onSessionError = (data) => {
-      toast.error(data.message, { position: 'top-center' });
-      handleCleanLogout();
-    };
-
-    const onHeartbeatAck = () => {
-      socket.lastHeartbeat = Date.now();
-    };
-
-    socket.on('force-logout', onForceLogout);
-    socket.on('session-registered', onSessionRegistered);
-    socket.on('session-error', onSessionError);
-    socket.on('heartbeat-ack', onHeartbeatAck);
-
-    // Setup heartbeat
-    heartbeatInterval.current = setInterval(() => {
-      if (socket.connected) {
-        socket.emit('heartbeat');
-      }
-    }, 15000);
-
-    // Initial heartbeat
-    socket.lastHeartbeat = Date.now();
-    socket.emit('heartbeat');
+    socket.on('force-logout', handleForceLogout);
+    socket.on('session-registered', handleSessionRegistered);
 
     return () => {
-      socket.off('force-logout', onForceLogout);
-      socket.off('session-registered', onSessionRegistered);
-      socket.off('session-error', onSessionError);
-      socket.off('heartbeat-ack', onHeartbeatAck);
-      clearInterval(heartbeatInterval.current);
+      socket.off('force-logout', handleForceLogout);
+      socket.off('session-registered', handleSessionRegistered);
     };
   }, []);
 
-  const handleCleanLogout = () => {
-    setIsLoggedIn(false);
-    setPin('');
-    socket.emit('manual-logout', { deviceId });
-  };
-
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (pin.length < 4) {
       toast.error('PIN must be at least 4 digits', { position: 'top-center' });
       return;
     }
-
-    try {
-      socket.emit('register-session', { pin, deviceId, deviceName });
-    } catch (error) {
-      toast.error('Connection error', { position: 'top-center' });
-      console.error('Submission error:', error);
-    }
+    socket.emit('register-session', { pin, deviceId, deviceName });
   };
 
   const handleLogout = () => {
-    handleCleanLogout();
+    setIsLoggedIn(false);
+    setPin('');
+    socket.emit('manual-logout', { deviceId });
     toast.info('Logged out successfully', { position: 'top-center' });
   };
 
