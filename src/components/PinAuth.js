@@ -9,7 +9,7 @@ const PinAuth = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [deviceName, setDeviceName] = useState('');
   const [deviceId, setDeviceId] = useState('');
-  const [currentSession, setCurrentSession] = useState(null);
+  const [, setCurrentSession] = useState(null);
 
   useEffect(() => {
     // Initialize device ID and name
