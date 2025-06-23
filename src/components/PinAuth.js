@@ -22,30 +22,38 @@ const PinAuth = () => {
     setDeviceId(id);
 
     // Socket event listeners
-    const handleForceLogout = (data) => {
-      let notificationMessage;
-      
-      if (data.isSameDevice) {
-        notificationMessage = `Session terminated - New login from this device`;
-      } else {
-        notificationMessage = `Session terminated - New login from: ${data.newDeviceDetails.fullName}`;
-      }
+     const handleForceLogout = (data) => {
+    // Disconnect the socket first
+    socket.disconnect();
+    
+    let notificationMessage;
+    if (data.isSameDevice) {
+      notificationMessage = `You've been logged out (new session on this device)`;
+    } else {
+      notificationMessage = `You've been logged out. New login from: ${data.newDevice}`;
+    }
 
-      toast.warning(notificationMessage, {
-        position: "top-center",
-        autoClose: 5000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-        theme: "colored"
-      });
+    toast.warning(notificationMessage, {
+      position: "top-center",
+      autoClose: 5000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+      theme: "colored"
+    });
 
-      // Reset state
-      setIsLoggedIn(false);
-      setCurrentSession(null);
-      setPin('');
-    };
+    // Reset all auth states
+    setIsLoggedIn(false);
+    setCurrentSession(null);
+    setPin('');
+    
+    // Reconnect socket after logout
+    setTimeout(() => {
+      socket.connect();
+    }, 1000);
+  };
+
 
     const handlePinRegistered = (data) => {
       if (data.isSameDevice) {
