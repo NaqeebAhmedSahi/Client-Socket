@@ -1,72 +1,98 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { v4 as uuidv4 } from 'uuid';
 import socket from '../socket';
+import { getDeviceDetails, generateDeviceId } from '../utils';
 
 const PinAuth = () => {
   const [pin, setPin] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [deviceName, setDeviceName] = useState('');
+  const [deviceDetails, setDeviceDetails] = useState(null);
   const [deviceId, setDeviceId] = useState('');
   const [, setCurrentSession] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    // Initialize device ID and name
-    let storedDeviceId = localStorage.getItem('deviceId');
-    if (!storedDeviceId) {
-      storedDeviceId = uuidv4();
-      localStorage.setItem('deviceId', storedDeviceId);
-    }
-    setDeviceId(storedDeviceId);
-
-    // Detect device name
-    const userAgent = navigator.userAgent;
-    let name = 'Unknown Device';
-    if (userAgent.includes('Windows')) name = 'Windows Device';
-    if (userAgent.includes('Mac')) name = 'Mac Device';
-    if (userAgent.includes('Linux')) name = 'Linux Device';
-    if (userAgent.includes('Android')) name = 'Android Device';
-    if (userAgent.includes('iPhone') || userAgent.includes('iPad')) name = 'iOS Device';
-    setDeviceName(name);
+    // Initialize device details
+    const details = getDeviceDetails();
+    setDeviceDetails(details);
+    
+    // Generate or get device ID
+    const id = generateDeviceId();
+    setDeviceId(id);
 
     // Socket event listeners
-    socket.on('force-logout', (data) => {
-      const message = data.isSameDevice 
-        ? `You've been logged out from this device (new session)` 
-        : `You've been logged out. New login from: ${data.newDevice}`;
+    const handleForceLogout = (data) => {
+      let notificationMessage;
       
-      toast.warning(message);
+      if (data.isSameDevice) {
+        notificationMessage = `Session terminated - New login from this device`;
+      } else {
+        notificationMessage = `Session terminated - New login from: ${data.newDeviceDetails.fullName}`;
+      }
+
+      toast.warning(notificationMessage, {
+        position: "top-center",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: "colored"
+      });
+
+      // Reset state
       setIsLoggedIn(false);
       setCurrentSession(null);
-    });
+      setPin('');
+    };
 
-    socket.on('pin-registered', (data) => {
+    const handlePinRegistered = (data) => {
       if (data.isSameDevice) {
-        toast.success('Session updated for this device');
+        toast.success(`Session refreshed on this device`, {
+          position: "top-center"
+        });
       } else {
-        toast.warning(`New device detected. Previous device: ${data.previousDevice}`);
+        toast.warning(`New device detected. Previous device: ${data.previousDevice}`, {
+          position: "top-center"
+        });
       }
       setIsLoggedIn(true);
-    });
+    };
 
-    socket.on('invalid-pin', (data) => {
-      toast.error(data.message);
+    const handleInvalidPin = (data) => {
+      toast.error(data.message, {
+        position: "top-center"
+      });
       setIsLoggedIn(false);
+    };
+
+    socket.on('force-logout', handleForceLogout);
+    socket.on('pin-registered', handlePinRegistered);
+    socket.on('invalid-pin', handleInvalidPin);
+    socket.on('error', (data) => {
+      toast.error(data.message, {
+        position: "top-center"
+      });
     });
 
     return () => {
-      socket.off('force-logout');
-      socket.off('pin-registered');
-      socket.off('invalid-pin');
+      socket.off('force-logout', handleForceLogout);
+      socket.off('pin-registered', handlePinRegistered);
+      socket.off('invalid-pin', handleInvalidPin);
+      socket.off('error');
     };
   }, []);
 
   const handlePinSubmit = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
     
     if (!pin || pin.length < 4) {
-      toast.error('PIN must be at least 4 characters');
+      toast.error('PIN must be at least 4 characters', {
+        position: "top-center"
+      });
+      setIsLoading(false);
       return;
     }
 
@@ -80,7 +106,7 @@ const PinAuth = () => {
         body: JSON.stringify({
           pin,
           deviceId,
-          deviceName,
+          deviceName: deviceDetails.fullName,
         }),
       });
 
@@ -98,53 +124,90 @@ const PinAuth = () => {
         socket.emit('register-pin', {
           pin,
           deviceId,
-          deviceName,
+          deviceName: deviceDetails.fullName,
         });
 
         if (data.isSameDevice) {
-          toast.info('Same device detected - previous sessions will be logged out');
+          toast.info('Session updated for this device', {
+            position: "top-center"
+          });
         } else if (data.existingDevice) {
-          toast.warning(`New device detected. Previous device: ${data.existingDevice}`);
+          toast.warning(`New device detected. Previous device: ${data.existingDevice}`, {
+            position: "top-center"
+          });
         } else {
-          toast.success('New PIN created and logged in');
+          toast.success('New PIN session created', {
+            position: "top-center"
+          });
         }
       }
     } catch (error) {
       console.error('Error:', error);
-      toast.error(error.message || 'Error connecting to server');
+      toast.error(error.message || 'Error connecting to server', {
+        position: "top-center"
+      });
       setIsLoggedIn(false);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
     setPin('');
-    toast.info('Logged out successfully');
+    toast.info('Logged out successfully', {
+      position: "top-center"
+    });
   };
 
   return (
-    <div className="pin-auth-container">
-      <h2>PIN Authentication</h2>
-      <p>Your Device: {deviceName} ({deviceId.slice(0, 8)})</p>
-      
-      {!isLoggedIn ? (
-        <form onSubmit={handlePinSubmit}>
-          <input
-            type="text"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            placeholder="Enter your PIN"
-            maxLength="6"
-          />
-          <button type="submit">Login</button>
-        </form>
-      ) : (
-        <div className="logged-in">
-          <p>Logged in with PIN: {pin}</p>
-          <p>Session active on: {deviceName}</p>
-          <button onClick={handleLogout}>Logout</button>
-        </div>
-      )}
+    <div className="auth-container">
+      <div className="auth-card">
+        <h2>🔒 PIN Authentication</h2>
+        
+        {deviceDetails && (
+          <div className="device-info">
+            <p><strong>Device:</strong> {deviceDetails.fullName}</p>
+            <p><strong>ID:</strong> {deviceId.slice(0, 8)}...</p>
+          </div>
+        )}
+        
+        {!isLoggedIn ? (
+          <form onSubmit={handlePinSubmit} className="auth-form">
+            <div className="input-group">
+              <label htmlFor="pin">Enter your PIN</label>
+              <input
+                id="pin"
+                type="password"
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="4-6 digit PIN"
+                maxLength="6"
+                autoComplete="off"
+              />
+            </div>
+            <button 
+              type="submit" 
+              className="auth-button"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Processing...' : 'Login'}
+            </button>
+          </form>
+        ) : (
+          <div className="session-info">
+            <div className="status-indicator active"></div>
+            <p><strong>Active Session:</strong> {pin}</p>
+            <p>Logged in on: {deviceDetails.fullName}</p>
+            <button 
+              onClick={handleLogout}
+              className="auth-button logout"
+            >
+              Logout
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
